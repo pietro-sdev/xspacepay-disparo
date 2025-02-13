@@ -6,7 +6,7 @@ import input from 'input';
 import fs from 'fs';
 
 /************************************************
- * 1) Tipos e Função para carregar grupos (arquivo links.txt)
+ * 1) Tipos e função para carregar grupos (arquivo links.txt)
  ************************************************/
 interface GroupEntry {
   number: string; // Ex.: "443"
@@ -100,44 +100,39 @@ function sleep(ms: number) {
  * 4) Função PRINCIPAL de um ciclo:
  *    - Entrada (join) nos grupos (do arquivo links.txt)
  *    - Envio das mensagens (com agendamento)
+ *
+ * Nesta versão:
+ *    - As mensagens estão fixadas (hardcoded) conforme abaixo.
+ *    - Cada conta (chip) receberá uma mensagem (rotacionando o array de 5 mensagens).
+ *    - Após enviar, o script tenta fixar (pin) a mensagem no grupo.
  ************************************************/
 async function runCycle() {
   /************************************************
-   * A) Solicitar ao usuário que digite 5 frases
+   * A) Mensagens fixadas (hardcoded)
    ************************************************/
-  const phrases: string[] = [];
-  console.log("\n[INPUT] Digite 5 frases (cada uma será utilizada na composição das mensagens):");
-  for (let i = 0; i < 5; i++) {
-    const frase = await input.text(`Digite a frase ${i + 1}: `);
-    phrases.push(frase);
-  }
-  console.log("[CONFIG] Frases registradas.");
-
-  /************************************************
-   * B) Definir os 10 links (pré-definidos)
-   ************************************************/
-  const linksArray = [
-    "https://t.me/link1",
-    "https://t.me/link2",
-    "https://t.me/link3",
-    "https://t.me/link4",
-    "https://t.me/link5",
-    "https://t.me/link6",
-    "https://t.me/link7",
-    "https://t.me/link8",
-    "https://t.me/link9",
-    "https://t.me/link10"
+  const fixedMessages: string[] = [
+    `🔞 Proibido pra mente fraca… só clique se aguentar 😈
+🔗 https://t.me/+3jtj8AjcapAxMTIx`,
+    `⚠ Segredo sujo revelado… entra rápido! 😏🔥
+🔗 https://t.me/+FeCu-TUPwKBkZDA5`,
+    `😈 Quem entra, não volta o mesmo… coragem?
+🔗 https://t.me/+G6ysVh7XADoyNjRh`,
+    `👀 Tá pronto pra ver o que ninguém deveria?
+🔗 https://t.me/+3PpDjsB-N_NhMjkx`,
+    `🚪 A porta abriu… mas fecha em segundos. Entra!
+🔗 https://t.me/+GKi-YNDWFt45YzEx`
   ];
+  console.log("[CONFIG] Mensagens fixadas carregadas.");
 
   /************************************************
-   * C) Carregar os grupos do arquivo "links.txt"
+   * B) Carregar os grupos do arquivo "links.txt"
    ************************************************/
   const filePath = 'links.txt';
   const groupEntries = loadGroupEntries(filePath);
   console.log(`[OK] Carregamos ${groupEntries.length} linhas do arquivo '${filePath}'.`);
 
   /************************************************
-   * D) Conectar até 30 contas ("chips")
+   * C) Conectar até 30 contas ("chips")
    ************************************************/
   const clients: { client: TelegramClient; index: number }[] = [];
   for (let i = 1; i <= 30; i++) {
@@ -179,30 +174,18 @@ async function runCycle() {
   console.log(`[INFO] Total de contas conectadas: ${clients.length}`);
 
   /************************************************
-   * E) Atribuir a cada conta (chip) uma mensagem composta
-   *    - Cada mensagem é formada de uma frase e um link.
-   *
-   *    Distribuição:
-   *      - Para os links: cada 3 chips usarão o mesmo link.
-   *        Se os chips estiverem ordenados (do 0 ao n-1):
-   *           linkIndex = Math.floor(i / 3)
-   *
-   *      - Para as frases: rodamos os índices de 0 a 4:
-   *           phraseIndex = i % 5
-   *
-   *    Assim, a mensagem do chip é: phrases[phraseIndex] + " " + linksArray[linkIndex]
+   * D) Atribuir a cada conta (chip) uma mensagem:
+   *     - São 5 mensagens fixadas; se houver mais contas, elas serão rotacionadas.
    ************************************************/
-  // Ordena os clientes pela propriedade "index" (número da conta)
   const sortedClients = clients.sort((a, b) => a.index - b.index);
   const assignedMessages: Record<number, string> = {};
   sortedClients.forEach((entry, i) => {
-    const linkIndex = Math.floor(i / 3) < linksArray.length ? Math.floor(i / 3) : linksArray.length - 1;
-    const phraseIndex = i % 5;
-    assignedMessages[entry.index] = `${phrases[phraseIndex]} ${linksArray[linkIndex]}`;
+    const messageIndex = i % fixedMessages.length;
+    assignedMessages[entry.index] = fixedMessages[messageIndex];
   });
 
   /************************************************
-   * F) Fazer cada conta entrar nos grupos/canais (do arquivo links.txt)
+   * E) Fazer cada conta entrar nos grupos/canais (do arquivo links.txt)
    *    – Em lotes de 10, com uma pausa de 2 minutos entre cada lote.
    ************************************************/
   const joinedGroups: Record<number, GroupEntry[]> = {};
@@ -234,36 +217,49 @@ async function runCycle() {
   console.log('\n[INFO] Finalizado o processo de entrada em grupos para todas as contas.');
 
   /************************************************
-   * G) Agendamento do envio das mensagens
+   * F) Agendamento do envio das mensagens:
+   *    - Dividimos os chips em 4 slots (aproximadamente):
+   *         Slot 0: 00:00 (delay 0)
+   *         Slot 1: 00:02 (delay 2 min)
+   *         Slot 2: 00:04 (delay 4 min)
+   *         Slot 3: 00:06 (delay 6 min)
    *
-   * Dividimos os chips em 4 slots de disparo (aproximadamente):
-   *   - Slot 0: 00:00 (delay 0)
-   *   - Slot 1: 00:02 (delay 2 min)
-   *   - Slot 2: 00:04 (delay 4 min)
-   *   - Slot 3: 00:06 (delay 6 min)
+   *    Para cada chip, calculamos o slot com base na sua posição
+   *    na lista ordenada e agendamos o envio.
    *
-   * Para cada chip, calculamos o slot com base na posição dele
-   * na lista ordenada. Uma forma simples é:
-   *      slot = Math.floor(i * 4 / totalClients)
+   *    Após enviar a mensagem em cada grupo, o script tenta fixá-la (pin).
    ************************************************/
   console.log('\n[INFO] Agendando envios de mensagens conforme horários programados...');
   const totalClients = sortedClients.length;
   const sendPromises = sortedClients.map((entry, sortedIndex) => {
     return new Promise<void>((resolve) => {
-      const slot = Math.floor(sortedIndex * 4 / totalClients); // 0 a 3
+      const slot = Math.floor(sortedIndex * 4 / totalClients); // valores de 0 a 3
       const delay = slot * 2 * 60 * 1000; // 0, 2, 4 ou 6 minutos
       setTimeout(async () => {
         const msg = assignedMessages[entry.index];
         const groupsForThisAccount = joinedGroups[entry.index] || [];
-        console.log(`[SENDING] Conta #${entry.index} enviando mensagem "${msg}" em ${groupsForThisAccount.length} grupo(s) (slot ${slot}, delay ${delay / 60000} min)...`);
+        console.log(`[SENDING] Conta #${entry.index} enviando mensagem fixa "${msg}" em ${groupsForThisAccount.length} grupo(s) (slot ${slot}, delay ${delay / 60000} min)...`);
         for (const grp of groupsForThisAccount) {
           try {
-            await entry.client.sendMessage(grp.link, { message: msg });
+            // Envia a mensagem e obtém o objeto retornado (com o id da mensagem)
+            const sentMessage = await entry.client.sendMessage(grp.link, { message: msg });
             console.log(`[OK] Conta #${entry.index}: Mensagem enviada no grupo #${grp.number}`);
+            // Tenta fixar (pinar) a mensagem
+            try {
+              const channelEntity = await entry.client.getEntity(grp.link);
+              await entry.client.invoke(new Api.channels.PinMessage({
+                channel: channelEntity,
+                id: sentMessage.id,
+                silent: false,
+              }));
+              console.log(`[OK] Conta #${entry.index}: Mensagem fixada no grupo #${grp.number}`);
+            } catch (pinError: any) {
+              console.log(`[ERRO] Conta #${entry.index} => Grupo #${grp.number} => Falha ao fixar mensagem: ${pinError.errorMessage || pinError}`);
+            }
           } catch (err: any) {
             console.log(`[ERRO] Conta #${entry.index} => Grupo #${grp.number} => Falha ao enviar: ${err.errorMessage || err}`);
           }
-          // (Opcional) Pequeno delay entre envios em grupos pela mesma conta:
+          // (Opcional) Pequeno delay entre envios na mesma conta:
           // await sleep(1000);
         }
         resolve();
